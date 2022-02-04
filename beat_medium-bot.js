@@ -77,6 +77,7 @@ function farming(s, from, to) {
     return;
   }
 
+  if (beam_enemy(s)) return;
   if (beam_friend(s, "attack")) return;
   if (beam_friend(s, "support")) return;
 
@@ -92,23 +93,24 @@ function defend_base(s) {
   s.move(base.position);
 }
 
-function defend_star(s, star) {
-  s.set_mark("attack");
-  s.shout("attack");
+function charge(s) {
+  if (s.sight.structures.length == 0) return false;
 
-  if (s.energy != 0 && beam_enemy(s)) return;
-  if (s.energy == s.energy_capacity) {
-    s.move(star.position);
-  } else {
-    stop_and_beam(star, s);
+  if (beamable(s, star_zxq) || beamable(s, star_a1c) || beamable(s, star_p89)) {
+    s.energize(s);
+    return true;
   }
+
+  return false;
 }
 
 function defend_position(s, pos) {
   s.set_mark("attack");
   s.shout("attack");
 
-  if (beam_enemy(s)) return;
+  if (s.energy != 0 && beam_enemy(s)) return;
+  if (s.energy != s.energy_capacity && charge(s)) return;
+
   s.move(pos);
 }
 
@@ -164,13 +166,13 @@ if (base.position[0] == 1600) {
   base_star = star_zxq;
   enemy_star = star_a1c;
   base_front = [1600, 750];
-  base_star_front = [1100, 1000];
+  base_star_front = [1200, 1100];
 } else {
   p_pos = 2;
   base_star = star_a1c;
   enemy_star = star_zxq;
   base_front = [2600, 1650];
-  base_star_front = [3100, 1400];
+  base_star_front = [3000, 1500];
 }
 
 function main() {
@@ -183,9 +185,35 @@ function main() {
 
   console.log("friendly troops: ", wait_sortie.length);
 
-  if (wait_sortie.length >= 130) {
+  if (wait_sortie.length >= 30) {
+    outpost_invading = true;
+  } else if (wait_sortie.length < 25) {
+    outpost_invading = false;
+  }
+
+  if (
+    outpost_invading &&
+    outpost.control == "amanou" &&
+    outpost.energy >= 500
+  ) {
+    outpost_occupation = true;
+  } else if (
+    !outpost_invading ||
+    outpost.control != "amanou" ||
+    outpost.energy <= 300
+  ) {
+    outpost_occupation = false;
+  }
+
+  if (outpost.control == "amanou" && outpost.energy == 1000) {
+    outpost_govern = true;
+  } else if (!outpost_occupation || wait_sortie.length <= 60) {
+    outpost_govern = false;
+  }
+
+  if (wait_sortie.length >= 100 && outpost_govern) {
     finish_blow = true;
-  } else if (wait_sortie.length < 100) {
+  } else if (wait_sortie.length < 80) {
     finish_blow = false;
   }
 
@@ -208,26 +236,18 @@ function main() {
     }
   }
 
-  if (wait_sortie.length >= 100) {
+  if (wait_sortie.length >= 80 && outpost_govern) {
     member = 20;
     var { sortie, wait_sortie } = split_sortie(wait_sortie, member);
     for (id of sortie) {
       s = spirits[id];
-      defend_star(s, enemy_star);
+      defend_position(s, enemy_star.position);
     }
   }
 
-  if (wait_sortie.length >= 30) {
-    member = 4;
-    var { sortie, wait_sortie } = split_sortie(wait_sortie, member);
-    for (id of sortie) {
-      s = spirits[id];
-      defend_star(s, star_p89);
-    }
-  }
-
-  if (wait_sortie.length >= 30) {
-    member = 4;
+  // outpost
+  if (outpost_invading) {
+    member = 5;
     var { sortie, wait_sortie } = split_sortie(wait_sortie, member);
     for (id of sortie) {
       s = spirits[id];
@@ -235,7 +255,7 @@ function main() {
     }
   }
 
-  if (wait_sortie.length >= 40) {
+  if (wait_sortie.length >= 30 && outpost_invading) {
     member = 5;
     var { sortie, wait_sortie } = split_sortie(wait_sortie, member);
     for (id of sortie) {
@@ -274,17 +294,19 @@ function main() {
   }
 
   // 恒星防衛部隊
-  if (wait_sortie.length > 25) {
-    member = 5;
-    var { sortie, wait_sortie } = split_sortie(
-      wait_sortie,
-      member,
-      (revers = true)
-    );
+  if (!outpost_occupation) {
+    if (wait_sortie.length > 25) {
+      member = 5;
+      var { sortie, wait_sortie } = split_sortie(
+        wait_sortie,
+        member,
+        (revers = true)
+      );
 
-    for (id of sortie) {
-      s = spirits[id];
-      defend_star(s, base_star);
+      for (id of sortie) {
+        s = spirits[id];
+        defend_position(s, base_star.position);
+      }
     }
   }
 
@@ -292,15 +314,6 @@ function main() {
     member = (wait_sortie.length / 3) * 2;
     wait_sortie.slice(-10);
     var { sortie, wait_sortie } = split_sortie(wait_sortie, member);
-
-    if (base.sight.enemies.length != 0) {
-      front_end = [
-        (base_front[0] + base_star_front[0]) / 2,
-        (base_front[1] + base_star_front[1]) / 2,
-      ];
-    } else {
-      front_end = base_star_front;
-    }
     for (i in sortie) {
       id = sortie[i];
       s = spirits[id];
@@ -309,17 +322,19 @@ function main() {
     }
   }
 
-  if (wait_sortie.length > 25) {
-    member = 10;
-    var { sortie, wait_sortie } = split_sortie(
-      wait_sortie,
-      member,
-      (revers = true)
-    );
+  if (!outpost_govern) {
+    if (wait_sortie.length > 25) {
+      member = 10;
+      var { sortie, wait_sortie } = split_sortie(
+        wait_sortie,
+        member,
+        (revers = true)
+      );
 
-    for (id of sortie) {
-      s = spirits[id];
-      defend_star(s, base_star);
+      for (id of sortie) {
+        s = spirits[id];
+        defend_position(s, base_star.position);
+      }
     }
   }
 
