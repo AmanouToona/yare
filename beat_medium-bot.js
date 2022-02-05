@@ -5,6 +5,9 @@ function distance(a, b) {
 }
 
 function beamable(a, b) {
+  if (a.structure_type == "star" && a.energy == 2) return false;
+  if (b.structure_type == "star" && b.energy == 2) return false;
+
   d = distance(a, b);
   return distance(a, b) < 195;
 }
@@ -21,29 +24,49 @@ function beamable_enemy(s) {
   return false;
 }
 
-function beam_enemy(s) {
+function beam_any_enemy(s) {
   if (s.sight.enemies.length == 0) return false;
 
-  enemies = s.sight.enemies.sort();
+  can_beam = false;
+  weak_enemy = false;
+  weak_point = 10000;
   for (enemy of s.sight.enemies) {
-    if (beamable(s, spirits[enemy])) {
-      s.energize(spirits[enemy]);
-      s.set_mark("battle");
-      return true;
+    if (!beamable(s, spirits[enemy])) continue;
+    if (spirits[enemy].energy < weak_point) {
+      can_beam = true;
+      weak_enemy = enemy;
+      weak_point = spirits[enemy].energy;
     }
   }
-  return false;
+
+  if (!can_beam) return false;
+  s.energize(spirits[weak_enemy]);
+  s.set_mark("battle");
+  return true;
 }
 
-function beam_friend(s, status) {
+function beam_enemy(s, enemy) {
+  if (s.sight.enemies.length == 0) return false;
+
+  if (!beamable(s, spirits[enemy])) {
+    s.move(spirits[enemy].position);
+    return false;
+  }
+  return true;
+}
+
+function beam_friend_label(s, status) {
   // status 中の友軍機へ供給
-  if (s.sight.friends.length === 0) {
+  if (s.sight.friends.length == 0) {
     return false;
   }
   for (friend of s.sight.friends) {
     if (spirits[friend].mark != status) continue;
     if (spirits[friend].energy == spirits[friend].energy_capacity) continue;
-    if (beamable(s, spirits[friend])) {
+    if (
+      beamable(s, spirits[friend]) &&
+      spirits[friend].energy != spirits[friend].energy_capacity
+    ) {
       s.energize(spirits[friend]);
       return true;
     }
@@ -84,11 +107,12 @@ function farming(s, from, to) {
     return;
   }
 
-  if (beam_enemy(s)) return;
-  if (beam_friend(s, "battle")) return;
-  if (beam_friend(s, "attacker")) return;
-  if (beam_friend(s, "support")) return;
+  if (beam_any_enemy(s)) return;
+  if (beam_friend_label(s, "battle")) return;
+  if (beam_friend_label(s, "attacker")) return;
+  if (beam_friend_label(s, "support")) return;
 
+  if (stab_stop(s)) return;
   stop_and_beam(s, to);
   return;
 }
@@ -104,13 +128,27 @@ function charge(s) {
   return false;
 }
 
-function defend_position(s, pos) {
+function defend_position(s, pos, stab = true) {
   s.set_mark("attacker");
   s.shout("attacker");
 
-  if (s.energy != 0 && beam_enemy(s)) return true;
+  if (s.energy != 0 && beam_any_enemy(s)) return true;
+  if (beam_friend_label(s, "battle")) return true;
   if (s.energy != s.energy_capacity && charge(s)) return true;
-  if (beam_friend(s, "battle")) return;
+  if (stab_stop(s) && stab) return true;
+
+  // attacker の間でエネルギーを平均化する
+  for (friend of s.sight.friends) {
+    if (
+      spirits[friend].energy < s.energy - 2 &&
+      spirits[friend].mark == "attacker"
+    ) {
+      if (beamable(s, spirits[friend])) {
+        s.energize(spirits[friend]);
+        return true;
+      }
+    }
+  }
 
   s.move(pos);
   return false;
@@ -129,6 +167,21 @@ function search_in_group(ss) {
   return false;
 }
 
+function stab_stop(s) {
+  if (s.sight.enemies.length == 0) return false;
+
+  tot = 0;
+  for (enemy of s.sight.enemies) {
+    if (spirits[enemy].energy < spirits[enemy].energy_capacity / 5) {
+      beam_enemy(s, enemy);
+      return true;
+    }
+    tot += spirits[enemy].energy;
+  }
+
+  return false;
+}
+
 function make_line(s, pos1, pos2, i, tot) {
   s.shout("attacker");
   if (tot == 0) return;
@@ -142,7 +195,7 @@ function make_line(s, pos1, pos2, i, tot) {
     posx = ((x1 - x2) / (tot - 1)) * i + x2;
     posy = ((y1 - y2) / (tot - 1)) * i + y2;
   }
-  if (beam_enemy(s)) return;
+  if (beam_any_enemy(s)) return;
   s.move([posx, posy]);
   return;
 }
@@ -186,10 +239,10 @@ function main() {
   }
   console.log("friendly troops: ", wait_sortie.length);
 
-  // outpost condition
-  if (wait_sortie.length >= 30) {
+  // outpost condition -----------------------------------------------------
+  if (wait_sortie.length >= 25) {
     outpost_invading = true;
-  } else if (wait_sortie.length < 25) {
+  } else if (wait_sortie.length < 20) {
     outpost_invading = false;
   }
 
@@ -217,7 +270,7 @@ function main() {
     outpost_invaded = false;
   }
 
-  // invading enemy star
+  // invading enemy star -------------------------------------------------
   if (!outpost_invaded || wait_sortie.length <= 60) {
     enemy_star_invading = false;
   } else if (wait_sortie.length >= 80) {
@@ -251,6 +304,20 @@ function main() {
   } else {
     enemy_star_invaded = false;
   }
+  // battle ======================================================================
+  // 基地防衛
+  if (base.sight.enemies.length > 0) {
+    member = Math.floor(wait_sortie.length / 5);
+    var { sortie, wait_sortie } = split_sortie(
+      wait_sortie,
+      member,
+      (revers = true)
+    );
+    for (id of sortie) {
+      s = spirits[id];
+      defend_position(s, base.position);
+    }
+  }
 
   if (enemy_star_invaded) {
     member = Math.floor(wait_sortie.length / 4);
@@ -267,7 +334,7 @@ function main() {
     var { sortie, wait_sortie } = split_sortie(wait_sortie, member);
     for (id of sortie) {
       s = spirits[id];
-      defend_position(s, enemy_star.position);
+      defend_position(s, enemy_star.position, (stab = false));
     }
   }
 
@@ -294,14 +361,14 @@ function main() {
     var { sortie, wait_sortie } = split_sortie(wait_sortie, member);
     for (id of sortie) {
       s = spirits[id];
-      farming(s, star_p89, outpost);
+      defend_position(s, star_p89.position);
     }
 
     member = Math.floor(wait_sortie.length / 7);
     var { sortie, wait_sortie } = split_sortie(wait_sortie, member);
     for (id of sortie) {
       s = spirits[id];
-      defend_position(s, star_p89.position);
+      farming(s, star_p89, outpost);
     }
   }
 
@@ -330,18 +397,6 @@ function main() {
     for (id of sortie) {
       s = spirits[id];
       defend_position(s, base_star.position);
-    }
-  }
-
-  if (search_in_group(wait_sortie)) {
-    member = wait_sortie.length / 2;
-    wait_sortie.slice(-10);
-    var { sortie, wait_sortie } = split_sortie(wait_sortie, member);
-    for (i in sortie) {
-      id = sortie[i];
-      s = spirits[id];
-      make_line(s, base_front, base_star_front, i, sortie.length);
-      s.set_mark("attacker");
     }
   }
 
