@@ -339,7 +339,7 @@ function main() {
   }
 
   if (outpost_invaded) {
-    member = Math.floor(wait_sortie.length / 8);
+    member = Math.floor(wait_sortie.length / 6);
     var { sortie, wait_sortie } = split_sortie(wait_sortie, member);
     for (id of sortie) {
       s = spirits[id];
